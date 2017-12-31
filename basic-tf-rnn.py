@@ -25,14 +25,22 @@ Whh = tf.Variable(np.random.randn(hidden_size, hidden_size) * 0.01)  # hidden to
 Why = tf.Variable(np.random.randn(vocab_size, hidden_size) * 0.01)  # hidden to output
 bh = tf.Variable(tf.zeros((hidden_size, 1)))  # hidden bias
 by = tf.Variable(tf.zeros((vocab_size, 1)))  # output bias
-x = tf.placeholder(tf.float32, vocab_size)  # our input
-y = tf.placeholder(tf.float32, vocab_size)  # our expected output label
-hprev = tf.placeholder(tf.floar32, hidden_size, hidden_size)  # TODO: Check this?
-h = tf.tanh(tf.Variable(tf.matmul(Whh, hprev) +
-                        tf.matmul(Wxh, x, b_is_sparse=True) + bh))  # TODO: Check this?
-init = tf.initialize_all_variables()
-logits = tf.matmul(Why, h) + by
+x_sequence = tf.placeholder(tf.int32, (vocab_size, seq_length))  # our input
+y_sequence = tf.placeholder(tf.int32, (vocab_size, seq_length))  # our expected output label
+init_h = tf.placeholder(tf.float32, [1, hidden_size])
 
+current_h = init_h
+h_sequence = list(init_h)
+for x in x_sequence:
+    next_h = tf.tanh(tf.matmul(Whh, current_h) +
+                     tf.matmul(Wxh, input, b_is_sparse=True) + bh)
+    h_sequence.append(next_h)
+    current_h = next_h
+
+logits = [tf.matmul(Why, h) + by for h in h_sequence]
+losses = [tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=y_sequence)]
+
+init = tf.initialize_all_variables()
 
 def sample(h, seed_ix, n):
     """
