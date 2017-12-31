@@ -17,7 +17,8 @@ def generateData():
     y = np.roll(x, echo_step)
     y[0:echo_step] = 0
 
-    x = x.reshape((batch_size, -1))  # The first index changing slowest, subseries as rows
+    # The first index changing slowest, subseries as rows
+    x = x.reshape((batch_size, -1))
     y = y.reshape((batch_size, -1))
 
     return (x, y)
