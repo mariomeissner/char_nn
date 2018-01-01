@@ -19,28 +19,35 @@ hidden_size = 500  # size of hidden layer of neurons
 seq_length = 50  # number of steps to unroll the RNN for
 learning_rate = 2e-1
 
-# model parameters
-Wxh = tf.Variable(np.random.randn(hidden_size, vocab_size) * 0.01)  # input to hidden
-Whh = tf.Variable(np.random.randn(hidden_size, hidden_size) * 0.01)  # hidden to hidden
-Why = tf.Variable(np.random.randn(vocab_size, hidden_size) * 0.01)  # hidden to output
-bh = tf.Variable(tf.zeros((hidden_size, 1)))  # hidden bias
-by = tf.Variable(tf.zeros((vocab_size, 1)))  # output bias
-x_sequence = tf.placeholder(tf.int32, (vocab_size, seq_length))  # our input
-y_sequence = tf.placeholder(tf.int32, (vocab_size, seq_length))  # our expected output label
-init_h = tf.placeholder(tf.float32, [1, hidden_size])
+# create the TF graph
+with tf.device('/device:GPU:0'):
 
-current_h = init_h
-h_sequence = list(init_h)
-for x in x_sequence:
-    next_h = tf.tanh(tf.matmul(Whh, current_h) +
-                     tf.matmul(Wxh, input, b_is_sparse=True) + bh)
-    h_sequence.append(next_h)
-    current_h = next_h
+    Wxh = tf.Variable(np.random.randn(hidden_size, vocab_size) * 0.01, dtype=tf.float32)  # input to hidden
+    Whh = tf.Variable(np.random.randn(hidden_size, hidden_size) * 0.01, dtype=tf.float32)  # hidden to hidden
+    Why = tf.Variable(np.random.randn(vocab_size, hidden_size) * 0.01, dtype=tf.float32)  # hidden to output
+    bh = tf.Variable(tf.zeros((hidden_size, 1)), dtype=tf.float32)  # hidden bias
+    by = tf.Variable(tf.zeros((vocab_size, 1)), dtype=tf.float32)  # output bias
+    x_sequence = tf.placeholder(tf.float32, (vocab_size, seq_length))  # our input
+    y_sequence = tf.placeholder(tf.int32, (vocab_size, seq_length))  # our expected output label
+    init_h = tf.placeholder(tf.float32, [hidden_size, 1])
+    # unroll the graph for seq_length timesteps
+    current_h = init_h
+    h_sequence = list()
+    h_sequence.append(init_h)
+    x_seq_list = tf.unstack(x_sequence, axis=1)
+    for x in x_seq_list:
+        next_h = tf.tanh(tf.matmul(Whh, current_h) +
+                         tf.matmul(Wxh, tf.expand_dims(x, 1), b_is_sparse=True) + bh)
+        h_sequence.append(next_h)
+        current_h = next_h
 
-logits = [tf.matmul(Why, h) + by for h in h_sequence]
-losses = [tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=y_sequence)]
+    logits = [tf.matmul(Why, h) + by for h in h_sequence]
+    pred_sequence = tf.nn.softmax(logits)
+    losses = [tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=y_sequence)]
+    mean_loss = tf.reduce_mean(losses)
+    init = tf.global_variables_initializer()
+    train_sequence = tf.train.AdagradOptimizer(0.3).minimize(mean_loss)
 
-init = tf.initialize_all_variables()
 
 def sample(h, seed_ix, n):
     """
@@ -51,37 +58,49 @@ def sample(h, seed_ix, n):
     return
 
 
-n, p = 0, 0
-smooth_loss = -np.log(1.0 / vocab_size) * seq_length  # loss at iteration 0
-while True:
-    # prepare inputs (we're sweeping from left to right in steps seq_length long)
-    if p + seq_length + 1 >= len(data) or n == 0:
-        hprev = np.zeros((hidden_size, 1))  # reset RNN memory
-        p = 0  # go from start of data
-    inputs = [char_to_ix[ch] for ch in data[p:p + seq_length]]
-    targets = [char_to_ix[ch] for ch in data[p + 1:p + seq_length + 1]]
+config = tf.ConfigProto(allow_soft_placement=True)
+with tf.Session(config = config) as sess:
+    sess.run(init)
+    loss_list = []
 
-    # sample from the model now and then
-    if n % 500 == 0:
-        seed_ix = inputs[0]
-        sample_ix = sample(hprev, seed_ix, 400)
-        txt = ''.join(ix_to_char[ix] for ix in sample_ix)
-        print(('----\n %s \n----' % (txt,)))
+    n, p = 0, 0
+    _current_state = np.random.randn(hidden_size, 1)
+    while True:
+        # prepare inputs (we're sweeping from left to right in steps seq_length long)
+        if p + seq_length + 1 >= len(data) or n == 0:
+            hprev = np.zeros((hidden_size, 1))  # reset RNN memory
+            p = 0  # go from start of data
+        input_chars_ix = [char_to_ix[ch] for ch in data[p:p + seq_length]]
+        target_chars_ix = [char_to_ix[ch] for ch in data[p + 1:p + seq_length + 1]]
 
-    # forward seq_length characters through the net and fetch gradient
-    loss, dWxh, dWhh, dWhy, dbh, dby, hprev = loss_fun(inputs, targets, hprev)
-    smooth_loss = smooth_loss * 0.999 + loss * 0.001
-    if n % 1000 == 0: print(('iter %d, loss: %f' % (n, smooth_loss)))  # print progress
+        # we need to create the input and target arrays of shape vocabsize x seq_length
+        input_oneshots = np.zeros((vocab_size, seq_length))
+        target_oneshots = np.zeros((vocab_size, seq_length))
+        for t in range(seq_length):
+            input_oneshots[input_chars_ix[t]][t] = 1  # set the char position to 1
+            target_oneshots[target_chars_ix[t]][t] = 1  # set the char position to 1
 
-    # perform parameter update with Adagrad
-    for param, dparam, mem in zip([Wxh, Whh, Why, bh, by],
-                                  [dWxh, dWhh, dWhy, dbh, dby],
-                                  [mWxh, mWhh, mWhy, mbh, mby]):
-        mem += dparam * dparam
-        param += -learning_rate * dparam / np.sqrt(mem + 1e-8)  # adagrad update
+        # sample from the model now and then
+        if n % 500 == 0:
+            # seed_ix = inputs[0]
+            # sample_ix = sample(hprev, seed_ix, 400)
+            print("I am processing")
+            # txt = ''.join(ix_to_char[ix] for ix in sample_ix)
+            # print(('----\n %s \n----' % (txt,)))
 
-    p += seq_length  # move data pointer
-    n += 1  # iteration counter
+
+        # forward seq_length characters through the net and fetch gradient
+        _mean_loss, _train_sequence, _current_state, _pred_sequence = sess.run(
+            [mean_loss, train_sequence, current_h, pred_sequence],
+            feed_dict={
+                x_sequence: input_oneshots,
+                y_sequence: target_oneshots,
+                init_h: _current_state
+            })
+        if n % 1000 == 0: print(('iter %d, loss: %f' % (n, _mean_loss)))  # print progress
+
+        p += seq_length  # move data pointer
+        n += 1  # iteration counter
 
 
 
