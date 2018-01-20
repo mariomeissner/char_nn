@@ -4,12 +4,12 @@ import tensorflow as tf
 
 num_epochs = 100
 total_series_length = 50000
-truncated_backprop_length = 15
-state_size = 4
+seq_length = 15
+hidden_size = 4
 num_classes = 2
 echo_step = 3
 batch_size = 5
-num_batches = total_series_length // batch_size // truncated_backprop_length
+num_batches = total_series_length // batch_size // seq_length
 
 
 def generateData():
@@ -24,15 +24,15 @@ def generateData():
     return (x, y)
 
 
-batchX_placeholder = tf.placeholder(tf.float32, [batch_size, truncated_backprop_length])
-batchY_placeholder = tf.placeholder(tf.int32, [batch_size, truncated_backprop_length])
+batchX_placeholder = tf.placeholder(tf.float32, [batch_size, seq_length])
+batchY_placeholder = tf.placeholder(tf.int32, [batch_size, seq_length])
 
-init_state = tf.placeholder(tf.float32, [batch_size, state_size])
+init_state = tf.placeholder(tf.float32, [batch_size, hidden_size])
 
-W = tf.Variable(np.random.rand(state_size + 1, state_size), dtype=tf.float32)
-b = tf.Variable(np.zeros((1, state_size)), dtype=tf.float32)
+W = tf.Variable(np.random.rand(hidden_size + 1, hidden_size), dtype=tf.float32)
+b = tf.Variable(np.zeros((1, hidden_size)), dtype=tf.float32)
 
-W2 = tf.Variable(np.random.rand(state_size, num_classes), dtype=tf.float32)
+W2 = tf.Variable(np.random.rand(hidden_size, num_classes), dtype=tf.float32)
 b2 = tf.Variable(np.zeros((1, num_classes)), dtype=tf.float32)
 
 # Unpack columns
@@ -70,8 +70,8 @@ def plot(loss_list, predictions_series, batchX, batchY):
 
         plt.subplot(2, 3, batch_series_idx + 2)
         plt.cla()
-        plt.axis([0, truncated_backprop_length, 0, 2])
-        left_offset = range(truncated_backprop_length)
+        plt.axis([0, seq_length, 0, 2])
+        left_offset = range(seq_length)
         plt.bar(left_offset, batchX[batch_series_idx, :], width=1, color="blue")
         plt.bar(left_offset, batchY[batch_series_idx, :] * 0.5, width=1, color="red")
         plt.bar(left_offset, single_output_series * 0.3, width=1, color="green")
@@ -89,13 +89,13 @@ with tf.Session() as sess:
 
     for epoch_idx in range(num_epochs):
         x, y = generateData()
-        _current_state = np.zeros((batch_size, state_size))
+        _current_state = np.zeros((batch_size, hidden_size))
 
         print("New data, epoch", epoch_idx)
 
         for batch_idx in range(num_batches):
-            start_idx = batch_idx * truncated_backprop_length
-            end_idx = start_idx + truncated_backprop_length
+            start_idx = batch_idx * seq_length
+            end_idx = start_idx + seq_length
 
             batchX = x[:, start_idx:end_idx]
             batchY = y[:, start_idx:end_idx]
