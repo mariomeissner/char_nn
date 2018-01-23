@@ -7,7 +7,7 @@ import numpy as np
 import tensorflow as tf
 
 # data I/O
-data = open('samples/star_wars.txt', 'r').read()
+data = open('samples/arvix_abstracts.txt', 'r').read()
 chars = list(set(data))
 data_size, vocab_size = len(data), len(chars)
 print(('data has %d characters, %d unique.' % (data_size, vocab_size)))
@@ -17,7 +17,7 @@ ix_to_char = {i: ch for i, ch in enumerate(chars)}
 # hyperparameters
 hidden_size = 500  # size of hidden layer of neurons
 seq_length = 50  # number of steps to unroll the RNN for
-batch_size = 3  # Number of inputs to evaluate simultaniously
+batch_size = 100  # Number of inputs to evaluate simultaniously
 learning_rate = 2e-1
 
 # create the TF graph
@@ -30,7 +30,9 @@ with tf.device('/device:GPU:0'):
     # Each row will be a batch
     x_batches = tf.placeholder(tf.float32, (seq_length, batch_size))  # our input
     y_batches = tf.placeholder(tf.int32, (seq_length, batch_size))  # our expected output label
+    single_state = tf.placeholder(tf.float32, (hidden_size, 1))
     init_h = tf.placeholder(tf.float32, (hidden_size, batch_size))
+    single_input = tf.placeholder(tf.float32, 1)
 
     # Unpack the rows (each will be one batch for one seq-stamp)
     x_batches_seq = tf.unstack(x_batches, axis=0)
@@ -55,18 +57,39 @@ with tf.device('/device:GPU:0'):
         for logits, y_batches in zip(logits_seq, y_batches_seq)]
     mean_loss = tf.reduce_mean(losses)
     train_seq = tf.train.AdagradOptimizer(0.3).minimize(mean_loss)
+
+    # Simple single forward pass:
+    single_logits = tf.matmul(Why, single_state) + by
+    single_predicion = tf.nn.softmax(single_logits, 0)
+    single_state_return = tf.tanh(tf.matmul(Whh, single_state)
+                                  + tf.matmul(Wxh, tf.expand_dims(single_input, 0))
+                                  + bh)
+    # Init all variables
     init = tf.global_variables_initializer()
+
 
 def sample(h, seed_ix, n):
     """
     sample a sequence of n integers from the model
     h is memory state, seed_ix is seed letter for first time step
     """
-    #  TODO: Rewrite this using tf
-    return
+    sample = []
+
+    h = np.expand_dims(h, 1)
+    ix = seed_ix
+    for _ in range(n):
+        logits, pred, h = sess.run(
+            [single_logits, single_predicion, single_state_return],
+            feed_dict={
+                single_input: [ix],
+                single_state: h
+            })
+        ix = np.random.choice(list(range(vocab_size)), p=np.ravel(pred))
+        sample.append(ix)
+    return sample
 
 
-config = tf.ConfigProto(allow_soft_placement=True)
+config = tf.ConfigProto(allow_soft_placement=True, log_device_placement=True)
 with tf.Session(config=config) as sess:
     sess.run(init)
     loss_list = []
@@ -76,7 +99,6 @@ with tf.Session(config=config) as sess:
     while True:
         # prepare inputs (we're sweeping from left to right in steps seq_length long)
         if p + seq_length * batch_size + 1 >= len(data) or n == 0:
-            hprev = np.zeros((hidden_size, 1))  # reset RNN memory
             p = 0  # go from start of data
         input_chars_ix = [char_to_ix[ch] for ch in data[p:p + seq_length * batch_size]]
         target_chars_ix = [char_to_ix[ch] for ch in data[p + 1:p + seq_length * batch_size + 1]]
@@ -92,11 +114,10 @@ with tf.Session(config=config) as sess:
 
         # sample from the model now and then
         if n % 500 == 0:
-            # seed_ix = inputs[0]
-            # sample_ix = sample(hprev, seed_ix, 400)
-            print("I am processing")
-            # txt = ''.join(ix_to_char[ix] for ix in sample_ix)
-            # print(('----\n %s \n----' % (txt,)))
+            seed_ix = input_batches[0, 0]
+            sample_ix = sample(_current_state[:, 0], seed_ix, 400)
+            txt = ''.join(ix_to_char[ix] for ix in sample_ix)
+            print(('----\n %s \n----' % (txt,)))
 
         # forward seq_length characters through the net and fetch gradient
         _mean_loss, _train_seq, _current_state, _pred_seq = sess.run(
