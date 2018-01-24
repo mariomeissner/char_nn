@@ -5,7 +5,7 @@ BSD License
 import numpy as np
 
 # data I/O
-data = open('samples/star_wars.txt', 'r').read()
+data = open('samples/arvix_abstracts.txt', 'r').read()
 chars = list(set(data))
 data_size, vocab_size = len(data), len(chars)
 print(('data has %d characters, %d unique.' % (data_size, vocab_size)))
