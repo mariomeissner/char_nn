@@ -1,13 +1,22 @@
 """
-Minimal character-level Vanilla RNN model.
+Minimal character-level Vanilla RNN model implemented with tensorflow.
 Author: Mario Meissner
 """
 
 import numpy as np
 import tensorflow as tf
+import torch as pt
+import re
+
+def softmax(x):
+    """Compute softmax values for each sets of scores in x."""
+    e_x = np.exp(x - np.max(x))
+    return e_x / e_x.sum()
+
 
 # data I/O
-data = open('samples/arxiv_abstracts.txt', 'r').read()
+data = open('star_wars.txt', 'r').read()
+data = re.sub('[^a-z\s]', '', re.sub('\s+', ' ', data.lower()))
 chars = list(set(data))
 data_size, vocab_size = len(data), len(chars)
 print(('data has %d characters, %d unique.' % (data_size, vocab_size)))
@@ -17,7 +26,8 @@ ix_to_char = {i: ch for i, ch in enumerate(chars)}
 # hyperparameters
 hidden_size = 100  # size of hidden layer of neurons
 seq_length = 50  # number of steps to unroll the RNN for
-learning_rate = 5e-1
+learning_rate = 5e-2
+temperature = 0.5
 
 # create the TF graph
 with tf.device('/device:GPU:0'):
@@ -42,6 +52,7 @@ with tf.device('/device:GPU:0'):
     current_h = init_h
     for x in x_list:
         # Add the second dimension back (x_batch will be a column)
+
         x = tf.expand_dims(x, 1)
         next_h = tf.tanh(tf.matmul(Whh, current_h) +
                          tf.matmul(Wxh, x) + bh)  # bh is a broadcasted summation
@@ -55,7 +66,7 @@ with tf.device('/device:GPU:0'):
         logits=tf.squeeze(logits), labels=y)
         for logits, y in zip(logits_seq, y_list)]
     mean_loss = tf.reduce_mean(losses)
-    train_seq = tf.train.AdagradOptimizer(0.5).minimize(mean_loss)
+    train_seq = tf.train.AdagradOptimizer(learning_rate).minimize(mean_loss)
 
     # Simple single forward pass:
     single_logits = tf.matmul(Why, single_state) + by
@@ -77,12 +88,16 @@ def sample(h, seed_ix, n):
         x = np.zeros([vocab_size, 1])
         x[seed_ix] = 1
         for _ in range(n):
-            logits, pred, h = sess.run(
-                [single_logits, single_predicion, single_state_return],
+            pred, logits, h = sess.run(
+                [single_predicion, single_logits, single_state_return],
                 feed_dict={
                     single_input: x,
                     single_state: h
                 })
+
+            # Randomly choose one to append
+            # logits2 = np.squeeze(np.exp(logits / temperature))
+            # ix = pt.multinomial(1, logits2)[0]
             ix = np.random.choice(list(range(vocab_size)), p=np.ravel(pred))
             x = np.zeros([vocab_size, 1])
             x[ix] = 1
