@@ -3,10 +3,11 @@ Minimal character-level Vanilla RNN model implemented with tensorflow.
 Author: Mario Meissner
 """
 
+import re
+
 import numpy as np
 import tensorflow as tf
-import torch as pt
-import re
+
 
 def softmax(x):
     """Compute softmax values for each sets of scores in x."""
@@ -36,11 +37,14 @@ with tf.device('/device:GPU:0'):
     Why = tf.Variable(np.random.randn(vocab_size, hidden_size) * 0.01, dtype=tf.float32)  # hidden to output
     bh = tf.Variable(tf.zeros((hidden_size, 1)), dtype=tf.float32)  # hidden bias
     by = tf.Variable(tf.zeros((vocab_size, 1)), dtype=tf.float32)  # output bias
+    init_h = tf.placeholder(tf.float32, (hidden_size, 1))
+
     # Each row will be an entry
     x_series = tf.placeholder(tf.float32, (seq_length, vocab_size))  # our input
     y_series = tf.placeholder(tf.int32, (seq_length, vocab_size))  # our expected output label
+
+    # inputs to obtain the prediction of a single character
     single_state = tf.placeholder(tf.float32, (hidden_size, 1))
-    init_h = tf.placeholder(tf.float32, (hidden_size, 1))
     single_input = tf.placeholder(tf.float32, (vocab_size, 1))
 
     # Unpack the rows (each will be one batch for one seq-stamp)
